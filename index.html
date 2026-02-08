@@ -1,0 +1,619 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VLC.js media player</title>
+  <link rel="icon" type="image/svg+xml" href="/assets/VLC_Icon.svg">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #2d2d2d;
+      color: #e0e0e0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* ── Title bar ─────────────────────────────────────────────── */
+    .title-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 4px 10px;
+      background: #3b3b3b;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+    }
+    .title-bar img { width: 20px; height: 20px; }
+    .title-bar span { font-size: 12px; color: #ccc; }
+
+    /* ── Menu bar ──────────────────────────────────────────────── */
+    .menu-bar {
+      display: flex;
+      background: #3b3b3b;
+      border-bottom: 1px solid #222;
+      flex-shrink: 0;
+      position: relative;
+      z-index: 100;
+    }
+    .menu-item {
+      position: relative;
+      padding: 5px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #ddd;
+    }
+    .menu-item:hover, .menu-item.open {
+      background: #505050;
+    }
+    .menu-dropdown {
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      background: #3b3b3b;
+      border: 1px solid #555;
+      min-width: 240px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      z-index: 200;
+    }
+    .menu-item.open .menu-dropdown { display: block; }
+    .menu-action {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 20px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #ddd;
+      white-space: nowrap;
+    }
+    .menu-action:hover { background: #ff6600; color: #fff; }
+    .menu-action.disabled { color: #777; pointer-events: none; }
+    .menu-action .shortcut { color: #999; margin-left: 30px; font-size: 11px; }
+    .menu-action:hover .shortcut { color: #eee; }
+    .menu-sep { border-top: 1px solid #555; margin: 3px 0; }
+
+    /* ── Video area ────────────────────────────────────────────── */
+    .video-area {
+      flex: 1;
+      background: #000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      position: relative;
+      overflow: hidden;
+      min-height: 0;
+    }
+    .video-area.drag-over::after {
+      content: 'Drop files to play';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,102,0,0.15);
+      border: 3px dashed #ff6600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.4rem;
+      color: #ff6600;
+      z-index: 10;
+    }
+    #player-canvas {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+      background: #000;
+    }
+    video#fallback-video {
+      max-width: 100%;
+      max-height: 100%;
+      display: block;
+      background: #000;
+    }
+    .cone-logo {
+      position: absolute;
+      opacity: 0.12;
+      width: 160px;
+      height: 160px;
+      pointer-events: none;
+    }
+    .video-area.has-media .cone-logo { display: none; }
+
+    /* ── Seek bar ──────────────────────────────────────────────── */
+    .seek-bar-container {
+      height: 20px;
+      background: #2d2d2d;
+      display: flex;
+      align-items: center;
+      padding: 0 6px;
+      flex-shrink: 0;
+    }
+    .seek-bar {
+      flex: 1;
+      height: 5px;
+      background: #555;
+      border-radius: 2px;
+      cursor: pointer;
+      position: relative;
+    }
+    .seek-bar .fill {
+      height: 100%;
+      background: #ff6600;
+      border-radius: 2px;
+      width: 0%;
+      pointer-events: none;
+    }
+    .seek-bar:hover .fill { background: #ff8833; }
+    .seek-bar .thumb {
+      display: none;
+      position: absolute;
+      top: 50%;
+      transform: translate(-50%, -50%);
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #ff6600;
+      pointer-events: none;
+    }
+    .seek-bar:hover .thumb { display: block; }
+
+    /* ── Controls bar ─────────────────────────────────────────── */
+    .controls-bar {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 4px 8px;
+      background: #3b3b3b;
+      border-top: 1px solid #222;
+      flex-shrink: 0;
+    }
+    .ctrl-btn {
+      background: none;
+      border: none;
+      color: #ccc;
+      width: 32px;
+      height: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      border-radius: 3px;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+    .ctrl-btn:hover { background: #505050; color: #fff; }
+    .ctrl-btn:active { background: #666; }
+    .ctrl-btn.active { color: #ff6600; }
+    .ctrl-btn:disabled { opacity: 0.35; cursor: default; }
+    .ctrl-btn:disabled:hover { background: none; color: #ccc; }
+    .ctrl-spacer { flex: 1; }
+
+    .time-display {
+      font-size: 11px;
+      color: #aaa;
+      font-variant-numeric: tabular-nums;
+      padding: 0 8px;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    /* Volume */
+    .vol-group {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+    .vol-slider {
+      width: 70px;
+      height: 4px;
+      accent-color: #ff6600;
+      cursor: pointer;
+    }
+
+    /* Speed indicator */
+    .speed-display {
+      font-size: 10px;
+      color: #999;
+      padding: 0 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .speed-display:hover { color: #ff6600; }
+
+    /* ── Status bar ────────────────────────────────────────────── */
+    .status-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 3px 10px;
+      background: #333;
+      border-top: 1px solid #222;
+      font-size: 11px;
+      color: #999;
+      flex-shrink: 0;
+    }
+    .status-bar .engine { color: #777; }
+
+    /* ── Playlist panel ────────────────────────────────────────── */
+    .main-area {
+      flex: 1;
+      display: flex;
+      min-height: 0;
+    }
+    .playlist-panel {
+      width: 280px;
+      background: #333;
+      border-left: 1px solid #222;
+      display: none;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+    .playlist-panel.visible { display: flex; }
+    .playlist-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 12px;
+      background: #3b3b3b;
+      border-bottom: 1px solid #222;
+      font-size: 12px;
+      font-weight: 600;
+      color: #ccc;
+    }
+    .playlist-header button {
+      background: none;
+      border: none;
+      color: #999;
+      cursor: pointer;
+      font-size: 14px;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+    .playlist-header button:hover { background: #505050; color: #fff; }
+    .playlist-actions {
+      display: flex;
+      gap: 2px;
+      padding: 4px 8px;
+      border-bottom: 1px solid #222;
+    }
+    .playlist-actions button {
+      background: #444;
+      border: none;
+      color: #bbb;
+      padding: 3px 8px;
+      font-size: 11px;
+      border-radius: 3px;
+      cursor: pointer;
+    }
+    .playlist-actions button:hover { background: #ff6600; color: #fff; }
+    .playlist-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 0;
+    }
+    .playlist-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      font-size: 12px;
+      cursor: pointer;
+      color: #bbb;
+      border-left: 3px solid transparent;
+    }
+    .playlist-item:hover { background: #444; }
+    .playlist-item.active { background: #444; border-left-color: #ff6600; color: #fff; }
+    .playlist-item .pl-num { color: #777; min-width: 18px; text-align: right; font-size: 10px; }
+    .playlist-item .pl-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .playlist-item .pl-dur { color: #777; font-size: 10px; font-variant-numeric: tabular-nums; }
+    .playlist-item .pl-remove {
+      visibility: hidden;
+      background: none;
+      border: none;
+      color: #999;
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 2px;
+    }
+    .playlist-item:hover .pl-remove { visibility: visible; }
+    .playlist-item .pl-remove:hover { color: #ff4444; }
+    .playlist-empty {
+      text-align: center;
+      padding: 30px 12px;
+      color: #666;
+      font-size: 12px;
+    }
+
+    /* ── Dialogs (Open File / URL) ─────────────────────────────── */
+    .dialog-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.6);
+      z-index: 500;
+      align-items: center;
+      justify-content: center;
+    }
+    .dialog-overlay.visible { display: flex; }
+    .dialog-box {
+      background: #3b3b3b;
+      border: 1px solid #555;
+      border-radius: 6px;
+      min-width: 420px;
+      max-width: 90vw;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+    }
+    .dialog-title {
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 600;
+      background: #333;
+      border-bottom: 1px solid #555;
+      border-radius: 6px 6px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .dialog-title img { width: 18px; height: 18px; }
+    .dialog-body { padding: 16px; }
+    .dialog-body label {
+      display: block;
+      font-size: 12px;
+      color: #aaa;
+      margin-bottom: 6px;
+    }
+    .dialog-body input[type="text"] {
+      width: 100%;
+      padding: 6px 10px;
+      font-size: 12px;
+      background: #2a2a2a;
+      border: 1px solid #555;
+      border-radius: 4px;
+      color: #ddd;
+      outline: none;
+    }
+    .dialog-body input[type="text"]:focus { border-color: #ff6600; }
+    .dialog-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 10px 16px;
+      border-top: 1px solid #555;
+    }
+    .dialog-footer button {
+      padding: 5px 18px;
+      font-size: 12px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      cursor: pointer;
+      background: #444;
+      color: #ddd;
+    }
+    .dialog-footer button:hover { background: #555; }
+    .dialog-footer button.primary {
+      background: #ff6600;
+      border-color: #ff6600;
+      color: #fff;
+    }
+    .dialog-footer button.primary:hover { background: #e65c00; }
+
+    /* Hidden file inputs */
+    .hidden-input { display: none; }
+
+    /* scrollbar styling */
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: #2a2a2a; }
+    ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #777; }
+  </style>
+</head>
+<body>
+
+<!-- Title bar -->
+<div class="title-bar">
+  <img src="/assets/VLC_Icon.svg" alt="VLC">
+  <span id="window-title">VLC.js media player</span>
+</div>
+
+<!-- Menu bar -->
+<nav class="menu-bar" id="menu-bar">
+  <div class="menu-item" data-menu="media">
+    Media
+    <div class="menu-dropdown">
+      <div class="menu-action" id="menu-open-file">Open File…<span class="shortcut">Ctrl+O</span></div>
+      <div class="menu-action" id="menu-open-multiple">Open Multiple Files…</div>
+      <div class="menu-action" id="menu-open-folder">Open Folder…</div>
+      <div class="menu-sep"></div>
+      <div class="menu-action" id="menu-open-url">Open Network Stream…<span class="shortcut">Ctrl+N</span></div>
+      <div class="menu-sep"></div>
+      <div class="menu-action" id="menu-open-playlist">Open Playlist File…</div>
+      <div class="menu-action" id="menu-save-playlist">Save Playlist to File…</div>
+      <div class="menu-sep"></div>
+      <div class="menu-action" id="menu-quit">Quit<span class="shortcut">Ctrl+Q</span></div>
+    </div>
+  </div>
+  <div class="menu-item" data-menu="playback">
+    Playback
+    <div class="menu-dropdown">
+      <div class="menu-action" id="menu-play">Play / Pause<span class="shortcut">Space</span></div>
+      <div class="menu-action" id="menu-stop">Stop<span class="shortcut">S</span></div>
+      <div class="menu-action" id="menu-prev">Previous<span class="shortcut">P</span></div>
+      <div class="menu-action" id="menu-next">Next<span class="shortcut">N</span></div>
+      <div class="menu-sep"></div>
+      <div class="menu-action" id="menu-speed-up">Speed Up<span class="shortcut">]</span></div>
+      <div class="menu-action" id="menu-speed-down">Slow Down<span class="shortcut">[</span></div>
+      <div class="menu-action" id="menu-speed-normal">Normal Speed<span class="shortcut">=</span></div>
+      <div class="menu-sep"></div>
+      <div class="menu-action" id="menu-jump-fwd">Jump Forward<span class="shortcut">→</span></div>
+      <div class="menu-action" id="menu-jump-back">Jump Backward<span class="shortcut">←</span></div>
+    </div>
+  </div>
+  <div class="menu-item" data-menu="audio">
+    Audio
+    <div class="menu-dropdown">
+      <div class="menu-action" id="menu-vol-up">Increase Volume<span class="shortcut">↑</span></div>
+      <div class="menu-action" id="menu-vol-down">Decrease Volume<span class="shortcut">↓</span></div>
+      <div class="menu-action" id="menu-mute">Mute / Unmute<span class="shortcut">M</span></div>
+    </div>
+  </div>
+  <div class="menu-item" data-menu="video">
+    Video
+    <div class="menu-dropdown">
+      <div class="menu-action" id="menu-fullscreen">Fullscreen<span class="shortcut">F</span></div>
+    </div>
+  </div>
+  <div class="menu-item" data-menu="view">
+    View
+    <div class="menu-dropdown">
+      <div class="menu-action" id="menu-toggle-playlist">Playlist<span class="shortcut">Ctrl+L</span></div>
+    </div>
+  </div>
+  <div class="menu-item" data-menu="help">
+    Help
+    <div class="menu-dropdown">
+      <div class="menu-action" id="menu-about">About</div>
+      <div class="menu-action" id="menu-shortcuts">Keyboard Shortcuts</div>
+    </div>
+  </div>
+</nav>
+
+<!-- Main content: video + playlist -->
+<div class="main-area">
+  <div class="video-area" id="video-area">
+    <img src="/assets/VLC_Icon.svg" class="cone-logo" alt="">
+    <canvas id="canvas" style="display:none"></canvas>
+    <video id="fallback-video" crossorigin="anonymous" playsinline></video>
+  </div>
+  <div class="playlist-panel" id="playlist-panel">
+    <div class="playlist-header">
+      <span>Playlist</span>
+      <div>
+        <button id="pl-add-btn" title="Add files">＋</button>
+        <button id="pl-clear-btn" title="Clear playlist">🗑</button>
+      </div>
+    </div>
+    <div class="playlist-actions">
+      <button id="pl-shuffle-btn">⇄ Shuffle</button>
+      <button id="pl-repeat-btn">🔁 Repeat: Off</button>
+    </div>
+    <div class="playlist-list" id="playlist-list">
+      <div class="playlist-empty">Drag files here or use Media → Open File</div>
+    </div>
+  </div>
+</div>
+
+<!-- Seek bar -->
+<div class="seek-bar-container">
+  <div class="seek-bar" id="seek-bar">
+    <div class="fill" id="seek-fill"></div>
+    <div class="thumb" id="seek-thumb"></div>
+  </div>
+</div>
+
+<!-- Transport controls -->
+<div class="controls-bar">
+  <button class="ctrl-btn" id="btn-prev" title="Previous (P)">⏮</button>
+  <button class="ctrl-btn" id="btn-stop" title="Stop (S)">⏹</button>
+  <button class="ctrl-btn" id="btn-play" title="Play (Space)">▶</button>
+  <button class="ctrl-btn" id="btn-next" title="Next (N)">⏭</button>
+
+  <span class="time-display" id="time-display">--:-- / --:--</span>
+
+  <div class="ctrl-spacer"></div>
+
+  <button class="ctrl-btn" id="btn-playlist" title="Playlist (Ctrl+L)">☰</button>
+  <button class="ctrl-btn" id="btn-repeat" title="Repeat">🔁</button>
+  <button class="ctrl-btn" id="btn-shuffle" title="Shuffle">⇄</button>
+
+  <div class="vol-group">
+    <button class="ctrl-btn" id="btn-mute" title="Mute (M)">🔊</button>
+    <input type="range" class="vol-slider" id="vol-slider" min="0" max="100" value="80">
+  </div>
+
+  <span class="speed-display" id="speed-display" title="Click to reset speed">1.0×</span>
+  <button class="ctrl-btn" id="btn-fullscreen" title="Fullscreen (F)">⛶</button>
+</div>
+
+<!-- Status bar -->
+<div class="status-bar">
+  <span id="status-text">Ready</span>
+  <span class="engine" id="engine-label">HTML5 Video</span>
+</div>
+
+<!-- Hidden file inputs -->
+<input type="file" class="hidden-input" id="input-file" accept="video/*,audio/*,.mkv,.avi,.flv,.wmv,.webm,.mp4,.mov,.ts,.vob,.ogg,.flac,.wav,.m4a" multiple>
+<input type="file" class="hidden-input" id="input-folder" webkitdirectory multiple>
+<input type="file" class="hidden-input" id="input-playlist" accept=".m3u,.m3u8,.pls,.xspf,.vlc,.wpl">
+
+<!-- Open URL Dialog -->
+<div class="dialog-overlay" id="dialog-url">
+  <div class="dialog-box">
+    <div class="dialog-title"><img src="/assets/VLC_Icon.svg" alt="">Open Network Stream</div>
+    <div class="dialog-body">
+      <label for="url-input">Please enter a network URL:</label>
+      <input type="text" id="url-input" placeholder="https://example.com/video.mp4">
+    </div>
+    <div class="dialog-footer">
+      <button id="url-cancel">Cancel</button>
+      <button id="url-play" class="primary">Play</button>
+    </div>
+  </div>
+</div>
+
+<!-- About Dialog -->
+<div class="dialog-overlay" id="dialog-about">
+  <div class="dialog-box">
+    <div class="dialog-title"><img src="/assets/VLC_Icon.svg" alt="">About VLC.js</div>
+    <div class="dialog-body" style="text-align:center; line-height:1.6">
+      <img src="/assets/VLC_Icon.svg" alt="VLC" style="width:64px;height:64px;margin-bottom:10px"><br>
+      <strong style="font-size:16px">VLC.js media player</strong><br>
+      <span style="color:#999;font-size:12px">WebAssembly Edition</span><br><br>
+      <span style="font-size:12px;color:#aaa">
+        VLC.js is a port of VLC media player to WebAssembly, built with Emscripten.<br>
+        Supports MKV, AVI, DVD menus, 10-bit video, SSA subtitles, and more.<br><br>
+        Based on <a href="https://www.videolan.org/vlc/" style="color:#ff6600">VLC media player</a>
+        by <a href="https://www.videolan.org/" style="color:#ff6600">VideoLAN</a>
+      </span>
+    </div>
+    <div class="dialog-footer">
+      <button id="about-close" class="primary">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Shortcuts Dialog -->
+<div class="dialog-overlay" id="dialog-shortcuts">
+  <div class="dialog-box" style="min-width:350px">
+    <div class="dialog-title"><img src="/assets/VLC_Icon.svg" alt="">Keyboard Shortcuts</div>
+    <div class="dialog-body" style="font-size:12px;line-height:2;color:#bbb">
+      <table style="width:100%">
+        <tr><td><kbd>Space</kbd></td><td>Play / Pause</td></tr>
+        <tr><td><kbd>S</kbd></td><td>Stop</td></tr>
+        <tr><td><kbd>P</kbd></td><td>Previous track</td></tr>
+        <tr><td><kbd>N</kbd></td><td>Next track</td></tr>
+        <tr><td><kbd>F</kbd></td><td>Toggle fullscreen</td></tr>
+        <tr><td><kbd>M</kbd></td><td>Mute / Unmute</td></tr>
+        <tr><td><kbd>↑</kbd> / <kbd>↓</kbd></td><td>Volume up / down</td></tr>
+        <tr><td><kbd>←</kbd> / <kbd>→</kbd></td><td>Seek ±10 seconds</td></tr>
+        <tr><td><kbd>[</kbd> / <kbd>]</kbd></td><td>Slower / Faster</td></tr>
+        <tr><td><kbd>=</kbd></td><td>Normal speed</td></tr>
+        <tr><td><kbd>Ctrl+O</kbd></td><td>Open file</td></tr>
+        <tr><td><kbd>Ctrl+N</kbd></td><td>Open network stream</td></tr>
+        <tr><td><kbd>Ctrl+L</kbd></td><td>Toggle playlist</td></tr>
+      </table>
+    </div>
+    <div class="dialog-footer">
+      <button id="shortcuts-close" class="primary">Close</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/player.js"></script>
+</body>
+</html>
