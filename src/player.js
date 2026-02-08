@@ -59,9 +59,11 @@ let nextFileId     = 1        // incrementing file ID for vlc_access_file
 let lastFileId     = null     // track previous file ID for cleanup
 let isSwitchingTrack = false  // guard against concurrent track switches
 
-// Time in ms to wait after stop() for WASM decoder threads and worker
-// message ports to complete cleanup before starting new playback.
-const DECODER_CLEANUP_DELAY_MS = 100
+// libvlc_state_t: 0=NothingSpecial, 5=Ended, 6=Error
+// States that indicate the player has fully stopped / is idle.
+const STOPPED_STATES = new Set([0, 5, 6])
+const STOP_POLL_INTERVAL_MS = 50
+const STOP_POLL_TIMEOUT_MS = 3000
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -332,11 +334,18 @@ async function playTrack(idx) {
     playlistIndex = idx
     const item = playlist[idx]
     
-    // Stop current and allow async cleanup to complete
+    // Stop current and wait for full async teardown
     if (mediaPlayer.is_playing()) {
-        mediaPlayer.stop()
-        // Allow WASM threads and decoder workers to finish cleanup
-        await new Promise(r => setTimeout(r, DECODER_CLEANUP_DELAY_MS))
+        mediaPlayer.stop_async()
+        // Poll until player reaches a stopped/idle state
+        const deadline = Date.now() + STOP_POLL_TIMEOUT_MS
+        while (!STOPPED_STATES.has(mediaPlayer.get_state()) && Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, STOP_POLL_INTERVAL_MS))
+        }
+        // If state polling timed out, yield to let pending teardown progress
+        if (!STOPPED_STATES.has(mediaPlayer.get_state())) {
+            await new Promise(r => setTimeout(r, STOP_POLL_INTERVAL_MS))
+        }
     }
 
     // Clean up previous file entry now that decoder cleanup has finished
