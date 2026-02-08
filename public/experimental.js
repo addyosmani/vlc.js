@@ -864,6 +864,11 @@ var initModule = (() => {
                             customCmd: "close"
                         })
                     }
+                    Module.decoderWorkerPort = undefined;
+                    if (Module.decoder) {
+                        Module.decoder.close();
+                        Module.decoder = undefined;
+                    }
                 }
             };
 
