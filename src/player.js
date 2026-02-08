@@ -55,6 +55,13 @@ let isReady        = false
 // Playlist
 const playlist     = []       // { name, src, file? }
 let playlistIndex  = -1
+let nextFileId     = 1        // incrementing file ID for vlc_access_file
+let lastFileId     = null     // track previous file ID for cleanup
+let isSwitchingTrack = false  // guard against concurrent track switches
+
+// Time in ms to wait after stop() for WASM decoder threads and worker
+// message ports to complete cleanup before starting new playback.
+const DECODER_CLEANUP_DELAY_MS = 100
 
 // ---------------------------------------------------------------------------
 // Initialization
@@ -284,7 +291,7 @@ function renderPlaylist() {
       <span class="pl-dur"></span> <!-- Duration not easily available before playing in this setup -->
       <button class="pl-remove" title="Remove">✕</button>
     `
-    el.querySelector('.pl-name').addEventListener('dblclick', () => playTrack(i))
+    el.querySelector('.pl-name').addEventListener('click', () => playTrack(i))
     el.querySelector('.pl-remove').addEventListener('click', (e) => {
       e.stopPropagation()
       removeFromPlaylist(i)
@@ -314,46 +321,61 @@ function savePlaylistToFile() {
 // ---------------------------------------------------------------------------
 // Playback logic
 // ---------------------------------------------------------------------------
-function playTrack(idx) {
+async function playTrack(idx) {
   if (idx < 0 || idx >= playlist.length) return
   if (!isReady) return
+  if (isSwitchingTrack) return
 
-  playlistIndex = idx
-  const item = playlist[idx]
-  
-  // Stop current
-  if (mediaPlayer.is_playing()) {
-      mediaPlayer.stop()
-  }
+  isSwitchingTrack = true
 
-  let media = null
-  if (item.file) {
-      // File object
-      // We need to mount it. We'll use a simple ID based system.
-      // In a real app we might need to manage IDs better.
-      const fileId = 1; // Always use 1 for current playing file for simplicity?
-      vlcModule.vlc_access_file[fileId] = item.file;
-      media = new Media(vlcModule, `emjsfile://${fileId}`);
-  } else if (item.src) {
-      // URL
-      media = new Media(vlcModule, item.src);
-  }
+  try {
+    playlistIndex = idx
+    const item = playlist[idx]
+    
+    // Stop current and allow async cleanup to complete
+    if (mediaPlayer.is_playing()) {
+        mediaPlayer.stop()
+        // Allow WASM threads and decoder workers to finish cleanup
+        await new Promise(r => setTimeout(r, DECODER_CLEANUP_DELAY_MS))
+    }
 
-  if (media) {
-      mediaPlayer.set_media(media)
-      media.release() // MediaPlayer keeps a reference
-      mediaPlayer.play()
-      
-      // Restore speed
-      mediaPlayer.set_rate(playbackSpeed)
-      
-      windowTitle.textContent = `${item.name} — VLC.js media player`
-      statusText.textContent = item.name
-      videoArea.classList.add('has-media')
-      isPlaying = true
-      btnPlay.textContent = '⏸'
-      
-      renderPlaylist()
+    // Clean up previous file entry now that decoder cleanup has finished
+    if (lastFileId !== null) {
+        delete vlcModule.vlc_access_file[lastFileId]
+        lastFileId = null
+    }
+
+    let media = null
+    if (item.file) {
+        // Use a unique file ID per track to avoid overwriting files
+        // still being read by a decoder during cleanup
+        const fileId = nextFileId++
+        vlcModule.vlc_access_file[fileId] = item.file;
+        lastFileId = fileId
+        media = new Media(vlcModule, `emjsfile://${fileId}`);
+    } else if (item.src) {
+        // URL
+        media = new Media(vlcModule, item.src);
+    }
+
+    if (media) {
+        mediaPlayer.set_media(media)
+        media.release() // MediaPlayer keeps a reference
+        mediaPlayer.play()
+        
+        // Restore speed
+        mediaPlayer.set_rate(playbackSpeed)
+        
+        windowTitle.textContent = `${item.name} — VLC.js media player`
+        statusText.textContent = item.name
+        videoArea.classList.add('has-media')
+        isPlaying = true
+        btnPlay.textContent = '⏸'
+        
+        renderPlaylist()
+    }
+  } finally {
+    isSwitchingTrack = false
   }
 }
 
