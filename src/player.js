@@ -169,16 +169,7 @@ async function initVLC() {
 // ---------------------------------------------------------------------------
 function fmtTime(sec) {
   if (!isFinite(sec) || sec < 0) return '--:--'
-  sec = Math.floor(sec / 1000) // VLC returns ms usually? No, check libvlc.js. 
-  // libvlc_media_player_get_time returns ms. libvlc_media_player_get_length returns ms.
-  // Wait, let's check libvlc.js implementation.
-  // _wasm_media_player_get_time returns time.
-  // Usually libvlc returns milliseconds.
-  
-  // Let's assume ms for now based on libvlc convention.
-  // But wait, fmtTime in original player.js took seconds.
-  // I will adjust fmtTime to take milliseconds or convert before calling.
-  
+  sec = Math.floor(sec)
   const h = Math.floor(sec / 3600)
   const m = Math.floor((sec % 3600) / 60)
   const s = Math.floor(sec % 60)
