@@ -772,6 +772,7 @@ var initModule = (() => {
                     const WEBCODEC_MAX_PICTURES = 32;
                     const picIndex = $0;
                     const poolIndex = $1;
+                    if (!Module.framePools || !Module.framePools[poolIndex]) return;
                     const frame = Module.framePools[poolIndex][picIndex];
                     console.assert(picIndex >= 0 && picIndex < WEBCODEC_MAX_PICTURES);
                     if (frame !== undefined) frame.close();
@@ -788,6 +789,7 @@ var initModule = (() => {
                             const decoderId = e.data.decoderId;
                             const picIndex = e.data.pictureIdx;
                             console.assert(picIndex >= 0 && picIndex < WEBCODEC_MAX_PICTURES);
+                            if (!Module.framePools || !Module.framePools[decoderId]) return;
                             const frame = Module.framePools[decoderId][picIndex];
                             if (frame === undefined) {
                                 port.postMessage({
@@ -814,6 +816,7 @@ var initModule = (() => {
                 },
                 5382854: $0 => {
                     const thread_id = $0;
+                    if (!Module.framePools || !Module.framePools[thread_id]) return;
                     let framePool = Module.framePools[thread_id];
                     console.warn("FLUSHING");
                     for (let i = 0; i < framePool.length; ++i) {
@@ -824,7 +827,7 @@ var initModule = (() => {
                     }
                 },
                 5383071: $0 => {
-                    Module.decoder.decode(Emval.toValue($0))
+                    if (Module.decoder) Module.decoder.decode(Emval.toValue($0))
                 },
                 5383120: $0 => {
                     const WEBCODEC_MAX_PICTURES = 32;
@@ -851,15 +854,21 @@ var initModule = (() => {
                     })
                 },
                 5383882: $0 => {
-                    Module.decoderWorkerPort.postMessage({
-                        customCmd: "decode",
-                        block: $0
-                    })
+                    if (Module.decoderWorkerPort) {
+                        Module.decoderWorkerPort.postMessage({
+                            customCmd: "decode",
+                            block: $0
+                        })
+                    }
                 },
                 5383960: () => {
-                    Module.decoderWorkerPort.postMessage({
-                        customCmd: "close"
-                    })
+                    if (Module.decoderWorkerPort) {
+                        Module.decoderWorkerPort.postMessage({
+                            customCmd: "close"
+                        })
+                    }
+                    Module.decoderWorkerPort = undefined;
+                    Module.decoder = undefined;
                 }
             };
 
@@ -1147,6 +1156,7 @@ var initModule = (() => {
 
             function __asyncjs__flushAsync() {
                 return Asyncify.handleAsync(async () => {
+                    if (!Module.decoderWorkerPort) return;
                     let p = new Promise(r => {
                         Module.flushPromiseResolver = r;
                         Module.decoderWorkerPort.postMessage({
