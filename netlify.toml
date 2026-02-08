@@ -1,0 +1,8 @@
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cross-Origin-Opener-Policy = "same-origin"
+    # 'credentialless' allows loading cross-origin media without requiring
+    # every resource to carry Cross-Origin-Resource-Policy headers, while
+    # still enabling SharedArrayBuffer.
+    Cross-Origin-Embedder-Policy = "credentialless"
